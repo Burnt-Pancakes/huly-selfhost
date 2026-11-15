@@ -32,9 +32,9 @@ configs:
     content: |
       port: 7880
       rtc:
-        tcp_port: 7881
-        udp_port: 7882
-        node_ip: ${LIVEKIT_NODE_IP}
+        tcp_port: ${LIVEKIT_TCP_PORT:-7881}
+        udp_port: ${LIVEKIT_UDP_PORT:-7882}
+        node_ip: ${LIVEKIT_NODE_IP:-0.0.0.0}
       keys:
         ${LIVEKIT_API_KEY}: ${LIVEKIT_API_SECRET}
 
@@ -45,12 +45,19 @@ services:
     environment:
       - TUNNEL_TOKEN=${CF_TUNNEL_TOKEN}
     restart: unless-stopped
-    networks: [huly_net]
+    networks: [huly_net, egress]
+
+  playit:
+    image: ${PLAYIT_IMAGE:-ghcr.io/playit-cloud/playit-agent:latest}
+    environment:
+      - SECRET_KEY=${PLAYIT_SECRET_KEY}
+    restart: unless-stopped
+    networks: [huly_net, egress]
 
   nginx:
     image: nginx:1.21.3
-    ports:
-      - "${HTTP_BIND:-0.0.0.0}:${HTTP_PORT}:80"
+    # No ports published. cloudflared reaches nginx:80 over huly_net.
+    # For temporary LAN debugging add: ports: ["127.0.0.1:8087:80"] and put nginx on the egress network too.
     configs:
       - source: huly_nginx
         target: /etc/nginx/conf.d/default.conf
@@ -98,7 +105,11 @@ services:
     restart: unless-stopped
     networks: [huly_net]
 
-  minio:
+  # S3-compatible object storage. Silo is the maintained community fork of MinIO
+  # (pgsty/silo). The "minio" network alias is kept so any hard-coded endpoint
+  # named minio still resolves. The "minio|" prefix in STORAGE_CONFIG is the
+  # adapter type, not the hostname, and stays as is.
+  silo:
     image: pgsty/silo:RELEASE.2026-09-16T00-00-00Z
     command: server /data --address ":9000" --console-address ":9001"
     volumes:
@@ -108,7 +119,10 @@ services:
       interval: 5s
       retries: 10
     restart: unless-stopped
-    networks: [huly_net]
+    networks:
+      huly_net:
+        aliases:
+          - minio
 
   elastic:
     image: elasticsearch:7.14.2
@@ -127,7 +141,8 @@ services:
       retries: 10
       test: curl -s http://localhost:9200/_cluster/health | grep -vq '"status":"red"'
     restart: unless-stopped
-    networks: [huly_net]
+    # egress is needed on first boot to download the ingest-attachment plugin
+    networks: [huly_net, egress]
 
   hulypulse:
     image: platformcollective/hulypulse:${HULY_PULSE_VERSION:-${HULY_VERSION}}
@@ -158,7 +173,7 @@ services:
   print:
     image: platformcollective/print:${HULY_VERSION}
     environment:
-      - STORAGE_CONFIG=minio|minio?accessKey=minioadmin&secretKey=minioadmin
+      - STORAGE_CONFIG=minio|silo?accessKey=minioadmin&secretKey=minioadmin
       - STATS_URL=http://stats:4900
       - SECRET=${SECRET}
       - ACCOUNTS_URL=http://account:3000
@@ -176,7 +191,8 @@ services:
       - SMTP_USERNAME=${SMTP_USERNAME}
       - SMTP_PASSWORD=${SMTP_PASSWORD}
     restart: unless-stopped
-    networks: [huly_net]
+    # egress needed to reach your SMTP server
+    networks: [huly_net, egress]
 
   notification:
     image: platformcollective/notification:${HULY_VERSION}
@@ -187,7 +203,8 @@ services:
       - PUSH_PUBLIC_KEY=${PUSH_PUBLIC_KEY}
       - PUSH_PRIVATE_KEY=${PUSH_PRIVATE_KEY}
     restart: unless-stopped
-    networks: [huly_net]
+    # egress needed to reach browser push services
+    networks: [huly_net, egress]
 
   transactor:
     image: platformcollective/transactor:${HULY_VERSION}
@@ -195,7 +212,7 @@ services:
       - SERVER_PORT=3333
       - SERVER_SECRET=${SECRET}
       - DB_URL=${CR_DB_URL}
-      - STORAGE_CONFIG=minio|minio?accessKey=minioadmin&secretKey=minioadmin
+      - STORAGE_CONFIG=minio|silo?accessKey=minioadmin&secretKey=minioadmin
       - FRONT_URL=http${SECURE:+s}://${HOST_ADDRESS}
       - ACCOUNTS_URL=http://account:3000
       - FULLTEXT_URL=http://fulltext:4700
@@ -215,7 +232,7 @@ services:
       - SECRET=${SECRET}
       - ACCOUNTS_URL=http://account:3000
       - STATS_URL=http://stats:4900
-      - STORAGE_CONFIG=minio|minio?accessKey=minioadmin&secretKey=minioadmin
+      - STORAGE_CONFIG=minio|silo?accessKey=minioadmin&secretKey=minioadmin
     restart: unless-stopped
     networks: [huly_net]
 
@@ -226,7 +243,7 @@ services:
       - SERVER_SECRET=${SECRET}
       - DB_URL=${CR_DB_URL}
       - TRANSACTOR_URL=ws://transactor:3333;ws${SECURE:+s}://${HOST_ADDRESS}/_transactor
-      - STORAGE_CONFIG=minio|minio?accessKey=minioadmin&secretKey=minioadmin
+      - STORAGE_CONFIG=minio|silo?accessKey=minioadmin&secretKey=minioadmin
       - FRONT_URL=http${SECURE:+s}://${HOST_ADDRESS}
       - STATS_URL=http://stats:4900
       - MODEL_ENABLED=*
@@ -243,7 +260,7 @@ services:
       - SERVER_SECRET=${SECRET}
       - DB_URL=${CR_DB_URL}
       - TRANSACTOR_URL=ws://transactor:3333;ws${SECURE:+s}://${HOST_ADDRESS}/_transactor
-      - STORAGE_CONFIG=minio|minio?accessKey=minioadmin&secretKey=minioadmin
+      - STORAGE_CONFIG=minio|silo?accessKey=minioadmin&secretKey=minioadmin
       - MODEL_ENABLED=*
       - ACCOUNTS_URL=http://account:3000
       - STATS_URL=http://stats:4900
@@ -273,8 +290,8 @@ services:
       - PRINT_URL=http${SECURE:+s}://${HOST_ADDRESS}/_print
       - PULSE_URL=http${SECURE:+s}://${HOST_ADDRESS}/_pulse
       - PUSH_PUBLIC_KEY=${PUSH_PUBLIC_KEY}
-      - LIVEKIT_WS=${LIVEKIT_HOST}
-      - STORAGE_CONFIG=minio|minio?accessKey=minioadmin&secretKey=minioadmin
+      - LIVEKIT_WS=${LIVEKIT_WS}
+      - STORAGE_CONFIG=minio|silo?accessKey=minioadmin&secretKey=minioadmin
       - TITLE=${TITLE:-Platform}
       - DEFAULT_LANGUAGE=${DEFAULT_LANGUAGE:-en}
       - LAST_NAME_FIRST=${LAST_NAME_FIRST:-true}
@@ -290,7 +307,7 @@ services:
       - DB_URL=${CR_DB_URL}
       - FULLTEXT_DB_URL=http://elastic:9200
       - ELASTIC_INDEX_NAME=huly_storage_index
-      - STORAGE_CONFIG=minio|minio?accessKey=minioadmin&secretKey=minioadmin
+      - STORAGE_CONFIG=minio|silo?accessKey=minioadmin&secretKey=minioadmin
       - REKONI_URL=http://rekoni:4004
       - ACCOUNTS_URL=http://account:3000
       - STATS_URL=http://stats:4900
@@ -324,7 +341,7 @@ services:
       - SECRET=${SECRET}
       - ACCOUNTS_URL=http://account:3000
       - DB_URL=${CR_DB_URL}
-      - STORAGE_CONFIG=minio|minio?accessKey=minioadmin&secretKey=minioadmin
+      - STORAGE_CONFIG=minio|silo?accessKey=minioadmin&secretKey=minioadmin
       - STORAGE_PROVIDER_NAME=minio
       - LIVEKIT_HOST=${LIVEKIT_HOST}
       - LIVEKIT_API_KEY=${LIVEKIT_API_KEY}
@@ -335,14 +352,22 @@ services:
   livekit:
     image: livekit/livekit-server:latest
     command: --config /etc/livekit.yaml
-    ports:
-      - "7881:7881/tcp"
-      - "7882:7882/udp"
+    # No ports published. Media arrives through the playit agent, which forwards
+    # to this container at its fixed address on huly_net.
     configs:
       - source: livekit_cfg
         target: /etc/livekit.yaml
     restart: unless-stopped
-    networks: [huly_net]
+    networks:
+      huly_net:
+        ipv4_address: 172.30.0.10
 
 networks:
+  # Backend network: no internet, no host access.
   huly_net:
+    internal: true
+    ipam:
+      config:
+        - subnet: 172.30.0.0/24
+  # Outbound-only network for the tunnel agents and the few services that need the internet.
+  egress: {}
