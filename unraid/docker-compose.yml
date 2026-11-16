@@ -57,7 +57,6 @@ services:
   nginx:
     image: nginx:1.21.3
     # No ports published. cloudflared reaches nginx:80 over huly_net.
-    # For temporary LAN debugging add: ports: ["127.0.0.1:8087:80"] and put nginx on the egress network too.
     configs:
       - source: huly_nginx
         target: /etc/nginx/conf.d/default.conf
@@ -349,21 +348,19 @@ services:
     image: livekit/livekit-server:latest
     command: --config /etc/livekit.yaml
     # No ports published. Media arrives through the playit agent, which forwards
-    # to this container at its fixed address on huly_net.
+    # to "livekit:<port>" by container name over huly_net. No fixed IP is needed.
     configs:
       - source: livekit_cfg
         target: /etc/livekit.yaml
     restart: unless-stopped
-    networks:
-      huly_net:
-        ipv4_address: 172.30.0.10
+    networks: [huly_net]
 
 networks:
-  # Backend network: no internet, no host access.
+  # Backend network: no internet, no host access. Docker chooses the subnet.
+  # The explicit name stops Compose from prefixing it twice (huly_huly_net).
   huly_net:
+    name: ${DOCKER_NAME:-huly}_net
     internal: true
-    ipam:
-      config:
-        - subnet: 172.30.0.0/24
   # Outbound-only network for the tunnel agents and the few services that need the internet.
-  egress: {}
+  egress:
+    name: ${DOCKER_NAME:-huly}_egress

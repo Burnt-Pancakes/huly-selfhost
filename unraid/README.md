@@ -8,10 +8,10 @@ Adapted from the upstream `compose.yml`. It has not been tested end to end, so v
 
 ## How it fits together
 
-- **No LAN exposure.** No host ports are published. The `huly_net` network is internal (no internet, no host access), and the Cloudflare tunnel agent reaches `nginx:80` by name.
-- **Egress network.** Only `cloudflared`, `playit`, `elastic` (first-boot plugin download), `mail` (SMTP) and `notification` (browser push) also join the outbound-only `egress` network.
+- **No LAN exposure.** No host ports are published. The `huly_net` network is internal (no internet, no host access), and the Cloudflare tunnel agent reaches `nginx:80` by name. Docker picks the subnet itself; nothing is hardcoded.
+- **Egress network.** Only `cloudflared`, `playit`, `elastic` (first-boot plugin download), `mail` (SMTP) and `notification` (browser push) also join the outbound-only `huly_egress` network.
 - **Object storage.** The service is named `minio` so every hard-coded path keeps working, but the image is `pgsty/silo`, a maintained community fork of MinIO (the upstream MinIO community repo is archived).
-- **Calls.** Web traffic uses Cloudflare Tunnel. LiveKit media uses a playit.gg UDP and TCP tunnel to the `livekit` container at the fixed address `172.30.0.10`.
+- **Calls.** Web traffic uses Cloudflare Tunnel. LiveKit media uses a playit.gg UDP and TCP tunnel whose local address is `livekit:<port>` (the container name).
 
 ## Requirements
 
@@ -103,7 +103,7 @@ In the tunnel's Public Hostnames:
 | `huly.example.com` | `http://nginx:80` |
 | `livekit.example.com` | `http://livekit:7880` |
 
-Cloudflare Tunnel carries HTTP and WebSocket traffic only. It cannot carry call media (UDP).
+Cloudflare Tunnel carries HTTP and WebSocket traffic only. It cannot carry call media (UDP). Protect both hostnames with your access rule (for example a client-certificate policy) before you start `cloudflared`.
 
 ## 5. Calls: playit.gg and LiveKit
 
@@ -113,7 +113,7 @@ LiveKit tells browsers which port it listens on and has no separate external-por
 2. Start only the agent: `docker compose up -d playit`.
 3. In the dashboard create one UDP tunnel and one TCP tunnel to that agent. Note each assigned public port.
 4. Put those numbers in `LIVEKIT_UDP_PORT` and `LIVEKIT_TCP_PORT`.
-5. Edit each tunnel's local address to `172.30.0.10:<the same port number>`.
+5. Edit each tunnel's local address to `livekit:<the same port number>`.
 6. Put the tunnel's public IP in `LIVEKIT_NODE_IP` (`dig +short <tunnel hostname>`).
 7. Start the rest in step 6.
 
@@ -132,7 +132,7 @@ docker compose logs -f account transactor
 
 In the Unraid Compose Manager plugin, point the stack at the `/mnt/cache/huly` folder so it finds both `docker-compose.yml` and `.env`.
 
-First start takes about a minute; Elasticsearch downloads its `ingest-attachment` plugin and needs the `egress` network. Because no ports are published, test through your Cloudflare hostname. For a temporary local test, add `ports: ["127.0.0.1:8087:80"]` to `nginx` and attach it to `egress` too.
+First start takes about a minute; Elasticsearch downloads its `ingest-attachment` plugin and needs the `egress` network. Because no ports are published, test through your Cloudflare hostname.
 
 ## 7. Disable public sign-up (optional)
 
@@ -147,7 +147,7 @@ Create your own account first, then add this line under `environment:` of both `
 - Image for `minio` is `pgsty/silo`; the service name stays `minio`.
 - nginx config is embedded via `configs`; `_love`, `_pulse` and `_print` routes are enabled.
 - `love`, `livekit`, `playit` and `cloudflared` are added; `hulypulse`, `mail` and `notification` are enabled.
-- No host ports are published; `huly_net` is internal.
+- No host ports are published; `huly_net` is internal and Docker assigns its subnet.
 - Unused `COCKROACH_SECRET`, `REDPANDA_SECRET`, `HTTP_BIND` and `HTTP_PORT` are removed.
 - Routes for calendar, gmail, telegram, github, export and aibot are not proxied.
 
@@ -167,5 +167,7 @@ docker compose up -d
 - **502 from nginx:** services are still starting, or the resolver `127.0.0.11` is wrong. That is Docker's embedded DNS; Podman needs a different one.
 - **File uploads fail:** `docker compose logs minio`.
 - **Calls connect but no audio or video:** the playit local address, the matching ports, or `LIVEKIT_NODE_IP` is wrong.
+- **playit cannot resolve `livekit`:** check `docker compose logs playit`. If the agent only accepts IP addresses, give LiveKit a fixed address: add `ipv4_address: <free IP>` under `livekit` and an `ipam` subnet under `huly_net` that does not overlap `docker network ls` output, then use that IP as the local address.
+- **`Pool overlaps with other one`:** a leftover network from an earlier attempt. Run `docker compose down` and `docker network rm huly_net huly_egress huly_huly_net`, then start again.
 - **`mail` or `notification` keeps restarting:** SMTP host or push keys are empty.
 - **Blank variable warnings from `docker compose config`:** a required line in `.env` is empty or misspelled.
