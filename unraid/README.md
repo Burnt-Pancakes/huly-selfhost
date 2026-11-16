@@ -42,21 +42,6 @@ chown -R 101:101 /mnt/cache/huly/redpanda
 
 If a container logs permission errors, adjust that directory.
 
-## 3. Configure huly.env
-
-```bash
-for name in SECRET CR_USER_PASSWORD REDPANDA_ADMIN_PWD LIVEKIT_API_SECRET; do
-  echo "$name=$(openssl rand -hex 32)"
-done
-
-npx web-push generate-vapid-keys   # PUSH_PUBLIC_KEY / PUSH_PRIVATE_KEY
-```
-
-`CR_USER_PASSWORD` must be repeated inside `CR_DB_URL`:
-
-```env
-CR_USER_PASSWORD=<hex>
-CR_DB_URL=postgres://selfhost:<hex>@cockroach:26257/defaultdb
 ```
 ## 3. Configure `.env`
 
