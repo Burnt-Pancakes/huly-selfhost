@@ -58,6 +58,31 @@ npx web-push generate-vapid-keys   # PUSH_PUBLIC_KEY / PUSH_PRIVATE_KEY
 CR_USER_PASSWORD=<hex>
 CR_DB_URL=postgres://selfhost:<hex>@cockroach:26257/defaultdb
 ```
+## 3. Configure `.env`
+
+Generate unique 64-character hex strings for your secrets:
+
+```bash
+for name in SECRET CR_USER_PASSWORD REDPANDA_ADMIN_PWD LIVEKIT_API_SECRET; do
+  echo "name=(openssl rand -hex 32)"
+done
+```
+
+Generate a VAPID key pair for `PUSH_PUBLIC_KEY` and `PUSH_PRIVATE_KEY` using either option:
+
+* **Browser (client-side):** Generate a key pair at [RandomKeygen VAPID Key Generator](https://randomkeygen.com/vapid-key) (runs locally in your browser).
+* **Unraid terminal (temporary Docker container):**
+  ```bash
+  docker run --rm node:20-alpine npx -y web-push generate-vapid-keys
+  ```
+
+`CR_USER_PASSWORD` must be repeated inside `CR_DB_URL`:
+
+```env
+CR_USER_PASSWORD=<hex>
+CR_DB_URL=postgres://selfhost:<hex>@cockroach:26257/defaultdb
+```
+
 
 | Variable | Purpose |
 |---|---|
