@@ -11,7 +11,7 @@ Adapted from the upstream `compose.yml`. It has not been tested end to end, so v
 - **No LAN exposure.** No host ports are published. The `huly_net` network is internal (no internet, no host access), and the Cloudflare tunnel agent reaches `nginx:80` by name. Docker picks the subnet itself; nothing is hardcoded.
 - **Egress network.** Only `cloudflared`, `playit`, `elastic` (first-boot plugin download), `mail` (SMTP) and `notification` (browser push) also join the outbound-only `huly_egress` network.
 - **Object storage.** The service is named `minio` so every hard-coded path keeps working, but the image is `pgsty/silo`, a maintained community fork of MinIO (the upstream MinIO community repo is archived).
-- **Calls.** Web traffic uses Cloudflare Tunnel. LiveKit media uses a playit.gg UDP and TCP tunnel whose local address is `livekit:<port>` (the container name).
+- **Calls.** Web traffic uses Cloudflare Tunnel. LiveKit media uses a playit.gg tunnel whose local address is `livekit:<port>` (the container name).
 
 ## Requirements
 
@@ -91,7 +91,7 @@ Full explanations are in `.env` next to each value.
 | `LIVEKIT_WS` | Public `wss://` URL browsers use |
 | `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET` | LiveKit key name and its password |
 | `PLAYIT_SECRET_KEY`, `PLAYIT_IMAGE` | playit.gg agent secret and image |
-| `LIVEKIT_UDP_PORT`, `LIVEKIT_TCP_PORT` | Public ports assigned by playit |
+| `LIVEKIT_UDP_PORT`, `LIVEKIT_TCP_PORT` | The playit tunnel's public port (the same number is the tunnel's Local Port) |
 | `LIVEKIT_NODE_IP` | Public IP of the playit tunnel |
 
 ## 4. Cloudflare Tunnel routes
@@ -107,14 +107,20 @@ Cloudflare Tunnel carries HTTP and WebSocket traffic only. It cannot carry call 
 
 ## 5. Calls: playit.gg and LiveKit
 
-LiveKit tells browsers which port it listens on and has no separate external-port setting, so the container must listen on the port playit assigns. The tunnel therefore comes first:
+Call audio and video travel over a separate playit.gg tunnel, because Cloudflare Tunnel cannot carry UDP.
+
+**The port rule.** LiveKit tells browsers which port it is listening on, and it cannot advertise a different public port. So the public port playit gives you and the port LiveKit listens on inside the container must be the same number. In the playit dashboard, the tunnel's Local Port is that same number. It is not `7880`: that is LiveKit's web/signalling port, which Cloudflare Tunnel carries.
+
+**One tunnel is enough.** Create one tunnel of type "TCP & UDP". It has a single public port, and you use that number for both `LIVEKIT_UDP_PORT` and `LIVEKIT_TCP_PORT`. LiveKit's docs list these as separate settings (`rtc.udp_port` for UDP, `rtc.tcp_port` for TCP fallback) [LiveKit ports](https://docs.livekit.io/transport/self-hosting/ports-firewall/). Using one number for both is untested here; if `docker compose logs livekit` reports a bind error, use two tunnels with two different numbers instead.
+
+Because LiveKit has to use playit's port, the tunnel comes first:
 
 1. Create a Docker agent in the playit dashboard and put its secret in `PLAYIT_SECRET_KEY`.
 2. Start only the agent: `docker compose up -d playit`.
-3. In the dashboard create one UDP tunnel and one TCP tunnel to that agent. Note each assigned public port.
-4. Put those numbers in `LIVEKIT_UDP_PORT` and `LIVEKIT_TCP_PORT`.
-5. Edit each tunnel's local address to `livekit:<the same port number>`.
-6. Put the tunnel's public IP in `LIVEKIT_NODE_IP` (`dig +short <tunnel hostname>`).
+3. In the dashboard create one "TCP & UDP" tunnel on that agent. Note its public port and public IP.
+4. Put the port number in `LIVEKIT_UDP_PORT` and `LIVEKIT_TCP_PORT`.
+5. Open the tunnel's **Origin Configuration** and set **Local IP** to `livekit`, **Local Port** to the same port number, and **Proxy Protocol** to `None`. LiveKit does not document PROXY protocol support, so leave it off.
+6. Put the tunnel's public IP in `LIVEKIT_NODE_IP`. Copy it from the dashboard. If the dashboard only shows a hostname such as `name.tun.ply.gg`, run `dig +short name.tun.ply.gg`. `dig` is a standard DNS lookup tool, and `+short` prints just the IP. If `dig` is not installed, use `nslookup name.tun.ply.gg`.
 7. Start the rest in step 6.
 
 If you cannot match ports, use LiveKit Cloud: remove the `livekit` service and the `livekit_cfg` block from `docker-compose.yml`, then set `LIVEKIT_HOST`, `LIVEKIT_WS`, `LIVEKIT_API_KEY` and `LIVEKIT_API_SECRET` to your cloud project's values.
@@ -166,7 +172,8 @@ docker compose up -d
 - **Sign-up fails:** `docker compose logs -f account`.
 - **502 from nginx:** services are still starting, or the resolver `127.0.0.11` is wrong. That is Docker's embedded DNS; Podman needs a different one.
 - **File uploads fail:** `docker compose logs minio`.
-- **Calls connect but no audio or video:** the playit local address, the matching ports, or `LIVEKIT_NODE_IP` is wrong.
+- **Calls connect but no audio or video:** the playit Local IP and Local Port, the matching ports in `.env`, or `LIVEKIT_NODE_IP` is wrong. If the tunnel's public IP changed, update `LIVEKIT_NODE_IP` and run `docker compose up -d livekit`.
+- **LiveKit fails to start with a port error:** TCP and UDP cannot share one number on your system. Create two tunnels and give `LIVEKIT_TCP_PORT` and `LIVEKIT_UDP_PORT` different numbers.
 - **playit cannot resolve `livekit`:** check `docker compose logs playit`. If the agent only accepts IP addresses, give LiveKit a fixed address: add `ipv4_address: <free IP>` under `livekit` and an `ipam` subnet under `huly_net` that does not overlap `docker network ls` output, then use that IP as the local address.
 - **`Pool overlaps with other one`:** a leftover network from an earlier attempt. Run `docker compose down` and `docker network rm huly_net huly_egress huly_huly_net`, then start again.
 - **`mail` or `notification` keeps restarting:** SMTP host or push keys are empty.
