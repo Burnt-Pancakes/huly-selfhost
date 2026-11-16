@@ -60,6 +60,7 @@ Generate a VAPID key pair for `PUSH_PUBLIC_KEY` and `PUSH_PRIVATE_KEY` using eit
   ```bash
   docker run --rm node:20-alpine npx -y web-push generate-vapid-keys
   ```
+Place keys under ===== LiveKit / Love ===== in the .env file
 
 `CR_USER_PASSWORD` must be repeated inside `CR_DB_URL`:
 
