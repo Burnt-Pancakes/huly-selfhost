@@ -24,8 +24,11 @@ Create an Unraid share named `huly`, preferably cache-only (no mover). Databases
 
 ```bash
 mkdir -p /mnt/cache/huly/{elastic,files,redpanda,cockroach/data,cockroach/certs}
-cp huly.yaml /mnt/cache/huly/
-cp huly.env.example /mnt/cache/huly/huly.env
+
+curl -fsSL https://raw.githubusercontent.com/Burnt-Pancakes/huly-selfhost/refs/heads/main/unraid/docker-compose.yml -o /mnt/cache/huly/docker-compose.yml
+
+curl -fsSL https://raw.githubusercontent.com/Burnt-Pancakes/huly-selfhost/refs/heads/main/unraid/.env -o /mnt/cache/huly/.env
+
 ```
 
 ## 2. Fix ownership for rootless
