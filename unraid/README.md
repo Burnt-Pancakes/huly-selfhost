@@ -45,7 +45,10 @@ If a container logs permission errors, adjust that directory.
 ## 3. Configure huly.env
 
 ```bash
-openssl rand -hex 32   # SECRET, CR_USER_PASSWORD, REDPANDA_ADMIN_PWD, LIVEKIT_API_SECRET
+for name in SECRET CR_USER_PASSWORD REDPANDA_ADMIN_PWD LIVEKIT_API_SECRET; do
+  echo "$name=$(openssl rand -hex 32)"
+done
+
 npx web-push generate-vapid-keys   # PUSH_PUBLIC_KEY / PUSH_PRIVATE_KEY
 ```
 
