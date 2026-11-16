@@ -42,7 +42,7 @@ chown -R 101:101 /mnt/cache/huly/redpanda
 
 If a container logs permission errors, adjust that directory.
 
-```
+
 ## 3. Configure `.env`
 
 Generate unique 64-character hex strings for your secrets:
