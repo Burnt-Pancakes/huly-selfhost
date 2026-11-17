@@ -1,5 +1,16 @@
 name: ${DOCKER_NAME:-huly}
 
+# Services that need the database, message queue and object store wait until
+# all three report healthy. This removes the start-up race (connection refused,
+# user does not exist yet, etc.) that appears when everything starts at once.
+x-backend-deps: &backend_deps
+  cockroach:
+    condition: service_healthy
+  redpanda:
+    condition: service_healthy
+  minio:
+    condition: service_healthy
+
 configs:
   huly_nginx:
     content: |
@@ -73,6 +84,14 @@ services:
     volumes:
       - ${VOLUME_CR_DATA_PATH:-cr_data}:/cockroach/cockroach-data
       - ${VOLUME_CR_CERTS_PATH:-cr_certs}:/cockroach/certs
+    # Healthy only once the selfhost user exists and can log in, so services
+    # never start in the window between the node coming up and the user being created.
+    healthcheck:
+      test: ['CMD-SHELL', '/cockroach/cockroach sql --url "postgresql://selfhost:$$COCKROACH_PASSWORD@127.0.0.1:26257/defaultdb?sslmode=disable" -e "SELECT 1" > /dev/null']
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 20s
     restart: unless-stopped
     networks: [huly_net]
 
@@ -203,6 +222,7 @@ services:
 
   transactor:
     image: platformcollective/transactor:${HULY_VERSION}
+    depends_on: *backend_deps
     environment:
       - SERVER_PORT=3333
       - SERVER_SECRET=${SECRET}
@@ -222,6 +242,7 @@ services:
 
   collaborator:
     image: platformcollective/collaborator:${HULY_VERSION}
+    depends_on: *backend_deps
     environment:
       - COLLABORATOR_PORT=3078
       - SECRET=${SECRET}
@@ -233,6 +254,7 @@ services:
 
   account:
     image: platformcollective/account:${HULY_VERSION}
+    depends_on: *backend_deps
     environment:
       - SERVER_PORT=3000
       - SERVER_SECRET=${SECRET}
@@ -251,6 +273,7 @@ services:
 
   workspace:
     image: platformcollective/workspace:${HULY_VERSION}
+    depends_on: *backend_deps
     environment:
       - SERVER_SECRET=${SECRET}
       - DB_URL=${CR_DB_URL}
@@ -297,6 +320,7 @@ services:
 
   fulltext:
     image: platformcollective/fulltext:${HULY_VERSION}
+    depends_on: *backend_deps
     environment:
       - SERVER_SECRET=${SECRET}
       - DB_URL=${CR_DB_URL}
@@ -322,7 +346,7 @@ services:
     image: platformcollective/hulykvs:${HULY_VERSION}
     depends_on:
       cockroach:
-        condition: service_started
+        condition: service_healthy
     environment:
       - HULY_DB_CONNECTION=${CR_DB_URL}
       - HULY_TOKEN_SECRET=${SECRET}
@@ -331,6 +355,7 @@ services:
 
   love:
     image: platformcollective/love:${HULY_VERSION}
+    depends_on: *backend_deps
     environment:
       - PORT=8096
       - SECRET=${SECRET}
